@@ -1,0 +1,92 @@
+#!/bin/bash
+
+# Variables for MySQL database, user, and password
+DB_NAME="wordpress"
+DB_USER="wordpressuser"
+DB_PASSWORD="yourpassword"
+ROOT_PASSWORD="yourrootpassword"
+
+# Variable for domain name
+DOMAIN_NAME="your_domain_or_IP"
+
+# Update and upgrade system
+echo "Updating system..."
+sudo apt update && sudo apt upgrade -y
+
+# Install Nginx
+echo "Installing Nginx..."
+sudo apt install nginx -y
+
+# Install MySQL
+echo "Installing MySQL..."
+sudo apt install mysql-server -y
+
+# Secure MySQL installation automatically
+echo "Securing MySQL installation..."
+sudo mysql <<EOF
+ALTER USER 'root'@'localhost' IDENTIFIED WITH 'mysql_native_password' BY '${ROOT_PASSWORD}';
+DELETE FROM mysql.user WHERE User='';
+DROP DATABASE IF EXISTS test;
+DELETE FROM mysql.db WHERE Db='test' OR Db='test_%';
+FLUSH PRIVILEGES;
+EOF
+
+# Install PHP and required PHP extensions
+echo "Installing PHP and required extensions..."
+sudo apt install php-fpm php-mysql php-curl php-json php-cgi php-cli php-gd php-xml php-mbstring php-zip -y
+
+# Download and set up WordPress
+echo "Downloading WordPress..."
+cd /var/www/html
+sudo wget https://wordpress.org/latest.tar.gz
+sudo tar -xvzf latest.tar.gz
+sudo rm latest.tar.gz
+
+# Set proper permissions for WordPress
+echo "Setting permissions..."
+sudo chown -R www-data:www-data /var/www/html/wordpress
+sudo chmod -R 755 /var/www/html/wordpress
+
+# Create MySQL database and user for WordPress
+echo "Creating MySQL database for WordPress..."
+sudo mysql -u root -p${ROOT_PASSWORD} <<MYSQL_SCRIPT
+CREATE DATABASE ${DB_NAME};
+CREATE USER '${DB_USER}'@'localhost' IDENTIFIED BY '${DB_PASSWORD}';
+GRANT ALL PRIVILEGES ON ${DB_NAME}.* TO '${DB_USER}'@'localhost';
+FLUSH PRIVILEGES;
+EXIT;
+MYSQL_SCRIPT
+
+# Configure Nginx for WordPress
+echo "Configuring Nginx for WordPress..."
+sudo tee /etc/nginx/sites-available/wordpress <<EOL
+server {
+    listen 80;
+    server_name ${DOMAIN_NAME};
+
+    root /var/www/html/wordpress;
+    index index.php index.html index.htm;
+
+    location / {
+        try_files \$uri \$uri/ /index.php?\$args;
+    }
+
+    location ~ \.php$ {
+        include snippets/fastcgi-php.conf;
+        fastcgi_pass unix:/var/run/php/php-fpm.sock;
+    }
+
+    location ~ /\.ht {
+        deny all;
+    }
+}
+EOL
+
+# Enable the configuration and restart Nginx
+echo "Enabling Nginx configuration..."
+sudo ln -s /etc/nginx/sites-available/wordpress /etc/nginx/sites-enabled/
+sudo unlink /etc/nginx/sites-enabled/default
+sudo nginx -t
+sudo systemctl restart nginx
+
+echo "LEMP stack and WordPress installation completed!"
